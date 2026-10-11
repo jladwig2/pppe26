@@ -158,24 +158,41 @@ static Geometry get_geometry(int cpu) {
 // PART 2 — the prediction.  See the handout; you implement this.
 
 int sets_reachable(int lda, const Geometry& g) {
-    // TODO (Part 2): return the number of distinct L1 sets that one column
+    // Return the number of distinct L1 sets that one column
     // of an N x lda matrix of doubles touches.
     //
-    // Everything you need is in `g`: g.line, g.sets, g.ways.
+    // Let S be the number of sets available to the hardware, and the lines
+    // per step is lda * 8 / line_size (for doubles). Then, the number of
+    // distict sets we visit is given by S / gcd(lines_per_step, S).
+    //
+    // This comes from 
+    //
+    // Everything needed is in `g`: g.line, g.sets, g.ways.
     // std::gcd is available from <numeric>.
     //
     // Work it out in this order:
-    //   1. How many BYTES does stepping down one row advance the address?
-    //   2. How many cache LINES is that?
-    //   3. By how many SETS does the set index advance per step?
-    //   4. Repeatedly adding that advance modulo g.sets, how many distinct
-    //      set numbers do you visit before repeating?
-    //
-    // Two cases are easy to get wrong; think about both before you code:
-    //   - What if the row is not a whole number of cache lines?
-    //   - What if the set index advances by exactly 0 per step?
-    (void)lda; (void)g;
-    return 1;   // <-- replace
+    //   1. Stepping down one row advances the address by lda*8 BYTES.
+    //   2. That is lda*8 / line_size LINES
+    //   3. Which is lda*8/ line_size (mod S) SETS
+    //   4. See above, S/gcd(adv, S)
+
+    uint64_t row_bytes = static_cast<uint64_t>(lda) * sizeof(double);
+
+    // Case 1: Row does not divide evenly into cache lines
+    // In this case, we eventually hit all sets due to the drift
+    if (row_bytes % g.line != 0) {
+        return g.sets;
+    }
+
+    uint64_t lines_per_step = row_bytes / g.line;
+    uint64_t adv = lines_per_step % g.sets;
+
+    // Case 2: Adv is exactly 0
+    if (adv == 0) {
+        return 1;
+    }
+
+    return static_cast<int>(g.sets / std::gcd(g.sets, adv));
 }
 
 // ===================================================================
