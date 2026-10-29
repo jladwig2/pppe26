@@ -144,8 +144,37 @@ void to_hex(const uint8_t* in, size_t n, char* out) {
 // Finish the leftover 0-31 bytes by calling the scalar to_hex on them.
 __attribute__((noinline))
 void to_hex_simd(const uint8_t* in, size_t n, char* out) {
-  // TODO (Part 3)
-  (void)in; (void)n; (void)out;
+  const __m256i table = _mm256_broadcastsi128_si256(
+      _mm_load_si128(reinterpret_cast<const __m128i*>(HEX)));
+  const __m256i mask = _mm256_set1_epi8(0x0f);
+
+  size_t i = 0;
+  for (; i + 32 <= n; i += 32) {
+    // 1. Load 32 input bytes.
+    __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(in + i));
+
+    // 2. Split every byte into its high nibble and low nibble.
+    __m256i hi = _mm256_and_si256(_mm256_srli_epi16(v, 4), mask);
+    __m256i lo = _mm256_and_si256(v, mask);
+
+    // 3. Look up both nibble vectors in the table (one shuffle each).
+    __m256i hex_hi = _mm256_shuffle_epi8(table, hi);
+    __m256i hex_lo = _mm256_shuffle_epi8(table, lo);
+
+    // 4. Interleave high and low characters within each 128-bit lane,
+    //    then permute the 128-bit halves into sequential order.
+    __m256i unpack_lo = _mm256_unpacklo_epi8(hex_hi, hex_lo);
+    __m256i unpack_hi = _mm256_unpackhi_epi8(hex_hi, hex_lo);
+    __m256i out0 = _mm256_permute2x128_si256(unpack_lo, unpack_hi, 0x20);
+    __m256i out1 = _mm256_permute2x128_si256(unpack_lo, unpack_hi, 0x31);
+
+    // 5. Store 64 output characters.
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 2 * i), out0);
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(out + 2 * i + 32), out1);
+  }
+
+  // Leftover 0-31 bytes.
+  to_hex(in + i, n - i, out + 2 * i);
 }
 #elif defined(SIMD_ARCH_NEON)
 // NEON: 16 input bytes -> 32 characters per iteration.
@@ -178,8 +207,22 @@ void to_hex_simd(const uint8_t*, size_t, char*) {}  // no SIMD path on this ISA
 // hn::StoreInterleaved2.  Highway's quick_reference.md documents them all.
 __attribute__((noinline))
 void to_hex_highway(const uint8_t* in, size_t n, char* out) {
-  // TODO (Part 4)
-  (void)in; (void)n; (void)out;
+  const hn::ScalableTag<uint8_t> d;
+  const size_t N = hn::Lanes(d);
+  const auto table = hn::LoadDup128(d, HEX);
+  const auto mask = hn::Set(d, 0x0f);
+
+  size_t i = 0;
+  for (; i + N <= n; i += N) {
+    const auto v = hn::LoadU(d, in + i);
+    const auto hi = hn::ShiftRight<4>(v);
+    const auto lo = hn::And(v, mask);
+    const auto hex_hi = hn::TableLookupBytes(table, hi);
+    const auto hex_lo = hn::TableLookupBytes(table, lo);
+    hn::StoreInterleaved2(hex_hi, hex_lo, d, reinterpret_cast<uint8_t*>(out + 2 * i));
+  }
+
+  to_hex(in + i, n - i, out + 2 * i);
 }
 #endif
 
