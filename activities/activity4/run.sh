@@ -5,7 +5,7 @@
 # python3 plot_results.py.
 set -euo pipefail
 cd "$(dirname "$0")"
-~/opencilk/bin/clang++ -fopencilk -fopenmp -O3 -std=c++17 simpson.linux.cpp -o simpson
+/opt/opencilk/bin/clang++ -fopencilk -fopenmp -O3 -std=c++17 simpson.linux.cpp -o simpson
 : > results.txt
 for r in 1 2 3; do
   for in in poly trig exp; do
